@@ -1,0 +1,6 @@
+{
+  "appId": "com.chao.game",
+  "appName": "Чао",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Чао — прототип</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1b1f14; overflow: hidden;
+               touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ===== НАСТРОЙКИ =====
+// Пути к картинкам. Если файла нет, рисуется заглушка.
+const ASSETS = {
+  hero:  "assets/hero.png",      // персонаж с ведёрком
+  ing:   [ "assets/ing1.png", "assets/ing2.png", "assets/ing3.png", "assets/ing4.png",
+           "assets/ing5.png", "assets/ing6.png", "assets/ing7.png", "assets/ing8.png" ],
+  dish:  "assets/dish_pot.png"   // готовое блюдо
+};
+const MAX_MISSES = 3;
+const SPAWN_EVERY = 1.0;   // секунды между ингредиентами
+const BASE_SPEED = 170;    // пикселей в секунду
+const SPEED_UP = 6;        // прирост скорости за каждый пойманный ингредиент
+const INGREDIENT_NAMES = ["Глаз", "Слизь", "Чешуя", "Плёнка", "Червь", "Кость", "Зуб", "Голова"];
+const INGREDIENT_COLORS = ["#c9a46a", "#9dd13a", "#8aa0b0", "#b7c4c9", "#c76b6b", "#e6dcc0", "#e0b43a", "#7fb06a"];
+
+// ===== ИНИЦИАЛИЗАЦИЯ =====
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const W = 400, H = 700;          // логические размеры
+let scale = 1, offX = 0, offY = 0;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  scale = Math.min(canvas.width / W, canvas.height / H);
+  offX = (canvas.width - W * scale) / 2;
+  offY = (canvas.height - H * scale) / 2;
+}
+window.addEventListener("resize", resize);
+resize();
+
+function loadImg(src) {
+  const img = new Image();
+  img.onload = () => img.ok = true;
+  img.onerror = () => img.ok = false;
+  img.src = src;
+  return img;
+}
+const heroImg = loadImg(ASSETS.hero);
+const ingImgs = ASSETS.ing.map(loadImg);
+const dishImg = loadImg(ASSETS.dish);
+
+// ===== СОСТОЯНИЕ =====
+let state = "menu";
+let heroX = W / 2, heroTarget = W / 2;
+let items = [];
+let caught = [];          // счётчик по видам
+let caughtTotal = 0;
+let misses = 0;
+let spawnTimer = 0;
+let speed = BASE_SPEED;
+let lastT = 0;
+let pointerActive = false;
+
+const BUCKET_Y = H - 150;  // уровень ведёрка (на руках)
+const BUCKET_W = 70;
+const BUCKET_H = 30;
+const HERO_W = 110;
+const HERO_Y = H - 20;     // низ персонажа
+
+// Кнопка "Начать" и "Ещё раз"
+const btn = { x: W/2 - 90, y: H/2 + 40, w: 180, h: 56 };
+
+function startGame() {
+  state = "play";
+  items = [];
+  caught = ING_ZERO();
+  caughtTotal = 0;
+  misses = 0;
+  spawnTimer = 0;
+  speed = BASE_SPEED;
+  heroX = W / 2; heroTarget = W / 2;
+}
+function ING_ZERO() { return INGREDIENT_NAMES.map(() => 0); }
+
+// ===== ВВОД =====
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (canvas.width / r.width);
+  const py = (e.clientY - r.top) * (canvas.height / r.height);
+  return { x: (px - offX) / scale, y: (py - offY) / scale };
+}
+function inBtn(p) {
+  return p.x >= btn.x && p.x <= btn.x + btn.w && p.y >= btn.y && p.y <= btn.y + btn.h;
+}
+canvas.addEventListener("pointerdown", e => {
+  const p = toLogical(e);
+  if (state === "menu" && inBtn(p)) { startGame(); return; }
+  if (state === "over" && inBtn(p)) { startGame(); return; }
+  if (state === "play") { pointerActive = true; heroTarget = clamp(p.x, 0, W); }
+});
+canvas.addEventListener("pointermove", e => {
+  if (state === "play" && pointerActive) {
+    heroTarget = clamp(toLogical(e).x, 0, W);
+  }
+});
+window.addEventListener("pointerup", () => pointerActive = false);
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// ===== ЛОГИКА =====
+function update(dt) {
+  if (state !== "play") return;
+
+  // персонаж плавно идёт к цели
+  heroX += (heroTarget - heroX) * Math.min(1, dt * 12);
+  heroX = clamp(heroX, BUCKET_W / 2, W - BUCKET_W / 2);
+
+  // спавн
+  spawnTimer += dt;
+  if (spawnTimer >= SPAWN_EVERY) {
+    spawnTimer = 0;
+    const type = Math.floor(Math.random() * INGREDIENT_NAMES.length);
+    items.push({ x: 30 + Math.random() * (W - 60), y: -40, type, size: 44 });
+  }
+
+  // движение и проверка
+  for (const it of items) it.y += speed * dt;
+
+  items = items.filter(it => {
+    // ловля: ингредиент касается ведёрка
+    const catchX = Math.abs(it.x - heroX) < BUCKET_W / 2 + it.size / 3;
+    const hitY = it.y + it.size / 2 >= BUCKET_Y - BUCKET_H / 2 &&
+                 it.y - it.size / 2 <= BUCKET_Y + BUCKET_H / 2;
+    if (catchX && hitY) {
+      caught[it.type]++;
+      caughtTotal++;
+      speed += SPEED_UP;
+      return false;
+    }
+    // промах: упал ниже ведёрка
+    if (it.y - it.size / 2 > H) {
+      misses++;
+      return false;
+    }
+    return true;
+  });
+
+  if (misses >= MAX_MISSES) state = "over";
+}
+
+// ===== ОТРИСОВКА =====
+function drawHero() {
+  if (heroImg.ok) {
+    ctx.drawImage(heroImg, heroX - HERO_W / 2, HERO_Y - HERO_W * 1.6, HERO_W, HERO_W * 1.6);
+  } else {
+    // заглушка: человечек с ведёрком
+    ctx.fillStyle = "#3d5a80";
+    ctx.fillRect(heroX - 26, HERO_Y - 150, 52, 110);          // тело
+    ctx.fillStyle = "#f1c69b";
+    ctx.beginPath(); ctx.arc(heroX, HERO_Y - 170, 20, 0, Math.PI * 2); ctx.fill(); // голова
+    ctx.fillStyle = "#222";
+    ctx.fillRect(heroX - 26, HERO_Y - 40, 18, 40);            // ноги
+    ctx.fillRect(heroX + 8, HERO_Y - 40, 18, 40);
+  }
+  // ведёрко
+  ctx.strokeStyle = "#cfd6dc"; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(heroX - BUCKET_W / 2, BUCKET_Y - BUCKET_H / 2);
+  ctx.lineTo(heroX - BUCKET_W / 2 + 8, BUCKET_Y + BUCKET_H / 2 + 8);
+  ctx.lineTo(heroX + BUCKET_W / 2 - 8, BUCKET_Y + BUCKET_H / 2 + 8);
+  ctx.lineTo(heroX + BUCKET_W / 2, BUCKET_Y - BUCKET_H / 2);
+  ctx.stroke();
+  ctx.fillStyle = "#9aa3ab";
+  ctx.fillRect(heroX - BUCKET_W / 2, BUCKET_Y - BUCKET_H / 2, BUCKET_W, 6);
+}
+
+function drawIngredient(it) {
+  const img = ingImgs[it.type];
+  if (img && img.ok) {
+    ctx.drawImage(img, it.x - it.size / 2, it.y - it.size / 2, it.size, it.size);
+  } else {
+    ctx.fillStyle = INGREDIENT_COLORS[it.type];
+    ctx.beginPath(); ctx.arc(it.x, it.y, it.size / 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.beginPath(); ctx.arc(it.x - 7, it.y - 4, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(it.x + 7, it.y - 4, 4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawHUD() {
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 22px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("Поймано: " + caughtTotal, 16, 34);
+  ctx.textAlign = "right";
+  let hearts = "";
+  for (let i = 0; i < MAX_MISSES; i++) hearts += i < misses ? "✖ " : "● ";
+  ctx.fillText(hearts.trim(), W - 16, 34);
+}
+
+function drawButton(label) {
+  ctx.fillStyle = "#e0701c";
+  roundRect(btn.x, btn.y, btn.w, btn.h, 14); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 24px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+  ctx.textBaseline = "alphabetic";
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawMenu() {
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.font = "bold 56px sans-serif";
+  ctx.fillText("ЧАО", W / 2, H / 2 - 60);
+  ctx.font = "18px sans-serif";
+  ctx.fillText("Лови ингредиенты. 3 промаха — и блюдо готово.", W / 2, H / 2 - 20);
+  drawButton("Начать");
+}
+
+function drawOver() {
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.font = "bold 40px sans-serif";
+  ctx.fillText("Чао готов!", W / 2, 110);
+
+  // блюдо
+  if (dishImg.ok) {
+    ctx.drawImage(dishImg, W / 2 - 110, 140, 220, 160);
+  } else {
+    ctx.fillStyle = "#4a4a3a";
+    ctx.beginPath(); ctx.ellipse(W / 2, 230, 110, 60, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#9dd13a";
+    ctx.beginPath(); ctx.ellipse(W / 2, 220, 90, 40, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // состав
+  ctx.font = "18px sans-serif";
+  ctx.fillStyle = "#fff";
+  ctx.fillText("Всего ингредиентов: " + caughtTotal, W / 2, 340);
+  let y = 375;
+  ctx.textAlign = "left";
+  ctx.font = "16px sans-serif";
+  for (let i = 0; i < INGREDIENT_NAMES.length; i++) {
+    if (caught[i] > 0) {
+      ctx.fillStyle = INGREDIENT_COLORS[i];
+      ctx.fillText("• " + INGREDIENT_NAMES[i] + ": " + caught[i], W / 2 - 80, y);
+      y += 24;
+    }
+  }
+  if (caughtTotal === 0) {
+    ctx.fillStyle = "#ccc";
+    ctx.textAlign = "center";
+    ctx.fillText("Ни одного ингредиента...", W / 2, y);
+  }
+
+  drawButton("Ещё раз");
+}
+
+// ===== ЦИКЛ =====
+function frame(t) {
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0);
+  lastT = t;
+  update(dt);
+
+  ctx.setTransform(scale, 0, 0, scale, offX, offY);
+  ctx.fillStyle = "#2f3d24";
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === "menu") {
+    drawMenu();
+  } else {
+    for (const it of items) drawIngredient(it);
+    drawHero();
+    drawHUD();
+    if (state === "over") drawOver();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
