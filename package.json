@@ -2,7 +2,7 @@
   "name": "chao",
   "version": "0.1.0",
   "private": true,
-  "description": "Чао — игра про ловлю ингредиентов",
+  "description": "Чам — игра про ловлю ингредиентов",
   "scripts": {
     "sync": "cap sync android"
   },

@@ -20,6 +20,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Restore stable debug keystore
+        if: ${{ secrets.DEBUG_KEYSTORE_B64 != '' }}
+        env:
+          KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p ~/.android
+          echo "$KS" | base64 -d > ~/.android/debug.keystore
+
       - name: Install npm dependencies
         run: npm install
 

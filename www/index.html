@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Чао — прототип</title>
+<title>Чам — прототип</title>
 <style>
   html, body { margin: 0; height: 100%; background: #1b1f14; overflow: hidden;
                touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -67,6 +67,8 @@ let spawnTimer = 0;
 let speed = BASE_SPEED;
 let lastT = 0;
 let pointerActive = false;
+let bubble = null;        // {text, t} — реплика персонажа
+let pendingSay = null;    // {text, at} — отложенная реплика
 
 const BUCKET_Y = H - 150;  // уровень ведёрка (на руках)
 const BUCKET_W = 70;
@@ -79,6 +81,9 @@ const btn = { x: W/2 - 90, y: H/2 + 40, w: 180, h: 56 };
 
 function startGame() {
   state = "play";
+  bubble = null;
+  pendingSay = null;
+  say("давай- там ещё двое поместятся", 2.0);
   items = [];
   caught = ING_ZERO();
   caughtTotal = 0;
@@ -86,6 +91,11 @@ function startGame() {
   spawnTimer = 0;
   speed = BASE_SPEED;
   heroX = W / 2; heroTarget = W / 2;
+}
+function say(text, dur = 1.6) { bubble = { text, t: dur }; }
+function tickBubble(dt) {
+  if (bubble) { bubble.t -= dt; if (bubble.t <= 0) bubble = null; }
+  if (pendingSay) { pendingSay.at -= dt; if (pendingSay.at <= 0) { say(pendingSay.text, 1.6); pendingSay = null; } }
 }
 function ING_ZERO() { return INGREDIENT_NAMES.map(() => 0); }
 
@@ -142,6 +152,7 @@ function update(dt) {
       caught[it.type]++;
       caughtTotal++;
       speed += SPEED_UP;
+      if (!bubble) say("о пошла возня", 1.2);
       return false;
     }
     // промах: упал ниже ведёрка
@@ -152,7 +163,11 @@ function update(dt) {
     return true;
   });
 
-  if (misses >= MAX_MISSES) state = "over";
+  if (misses >= MAX_MISSES) {
+    state = "over";
+    say("деликатес", 2.0);
+    pendingSay = { text: "вкуснятина", at: 2.0 };
+  }
 }
 
 // ===== ОТРИСОВКА =====
@@ -226,11 +241,32 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+function drawBubble() {
+  if (!bubble) return;
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const tw = ctx.measureText(bubble.text).width;
+  const bw = tw + 28, bh = 38;
+  const bx = clamp(heroX - bw / 2, 8, W - bw - 8);
+  const by = HERO_Y - HERO_W * 1.6 - 70;
+  ctx.fillStyle = "#fff";
+  roundRect(bx, by, bw, bh, 12); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(heroX - 8, by + bh);
+  ctx.lineTo(heroX, by + bh + 10);
+  ctx.lineTo(heroX + 8, by + bh);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#111";
+  ctx.fillText(bubble.text, bx + bw / 2, by + bh / 2 + 1);
+  ctx.textBaseline = "alphabetic";
+}
+
 function drawMenu() {
   ctx.fillStyle = "#fff";
   ctx.textAlign = "center";
   ctx.font = "bold 56px sans-serif";
-  ctx.fillText("ЧАО", W / 2, H / 2 - 60);
+  ctx.fillText("ЧАМ", W / 2, H / 2 - 60);
   ctx.font = "18px sans-serif";
   ctx.fillText("Лови ингредиенты. 3 промаха — и блюдо готово.", W / 2, H / 2 - 20);
   drawButton("Начать");
@@ -243,7 +279,7 @@ function drawOver() {
   ctx.fillStyle = "#fff";
   ctx.textAlign = "center";
   ctx.font = "bold 40px sans-serif";
-  ctx.fillText("Чао готов!", W / 2, 110);
+  ctx.fillText("Деликатес готов!", W / 2, 110);
 
   // блюдо
   if (dishImg.ok) {
@@ -283,6 +319,7 @@ function frame(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000 || 0);
   lastT = t;
   update(dt);
+  tickBubble(dt);
 
   ctx.setTransform(scale, 0, 0, scale, offX, offY);
   ctx.fillStyle = "#2f3d24";
@@ -295,6 +332,7 @@ function frame(t) {
     drawHero();
     drawHUD();
     if (state === "over") drawOver();
+    drawBubble();
   }
   requestAnimationFrame(frame);
 }
