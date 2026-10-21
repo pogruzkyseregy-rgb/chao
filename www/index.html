@@ -127,7 +127,7 @@ function update(dt) {
   if (spawnTimer >= SPAWN_EVERY) {
     spawnTimer = 0;
     const type = Math.floor(Math.random() * INGREDIENT_NAMES.length);
-    items.push({ x: 30 + Math.random() * (W - 60), y: -40, type, size: 44 });
+    items.push({ x: 30 + Math.random() * (W - 60), y: -50, type, size: 72 });
   }
 
   // движение и проверка
@@ -135,7 +135,7 @@ function update(dt) {
 
   items = items.filter(it => {
     // ловля: ингредиент касается ведёрка
-    const catchX = Math.abs(it.x - heroX) < BUCKET_W / 2 + it.size / 3;
+    const catchX = Math.abs(it.x - heroX) < BUCKET_W / 2 + it.size / 4;
     const hitY = it.y + it.size / 2 >= BUCKET_Y - BUCKET_H / 2 &&
                  it.y - it.size / 2 <= BUCKET_Y + BUCKET_H / 2;
     if (catchX && hitY) {
